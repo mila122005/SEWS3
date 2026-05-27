@@ -3,21 +3,33 @@ const cors = require("cors");
 require("dotenv").config();
 
 const { auth, db } = require("./firebase");
-const { sendEmail } = require('./utils/sendEmail');
-
-const API_KEY =
-  process.env.FIREBASE_API_KEY ||
-  "TU_API_KEY_FIREBASE";
+const { sendEmail } = require("./utils/sendEmail");
 
 const app = express();
 
-app.use(cors());
-app.use(express.json({ limit: "50mb" }));
-app.use(express.urlencoded({ extended: true, limit: "50mb" }));
+// =======================================
+// CONFIG
+// =======================================
+
+const API_KEY = process.env.FIREBASE_API_KEY;
 
 // =======================================
-// CORREOS DE ADMINISTRADORES
+// MIDDLEWARES
 // =======================================
+
+app.use(
+  cors({
+    origin: "*",
+  })
+);
+
+app.use(express.json({ limit: "50mb" }));
+app.use(express.urlencoded({ extended: true }));
+
+// =======================================
+// ADMIN EMAILS
+// =======================================
+
 const ADMIN_EMAILS = [
   "leonor.yumi@epn.edu.ec",
   "camila.bueno@epn.edu.ec",
@@ -25,8 +37,9 @@ const ADMIN_EMAILS = [
 ].map((email) => email.toLowerCase());
 
 // =======================================
-// OBTENER ROL SEGÚN EL CORREO
+// HELPERS
 // =======================================
+
 const getRoleByEmail = (email) => {
   if (!email) return "visitante";
 
@@ -43,27 +56,17 @@ const getRoleByEmail = (email) => {
   return "visitante";
 };
 
-// =======================================
-// NORMALIZAR TELÉFONO
-// =======================================
 const normalizePhone = (phone) => {
   if (!phone) return "";
-
   return String(phone).replace(/\D/g, "");
 };
 
-// =======================================
-// GUARDAR PERFIL EN FIRESTORE
-// =======================================
 const saveUserProfile = async (uid, profile) => {
   await db.collection("users").doc(uid).set(profile, {
     merge: true,
   });
 };
 
-// =======================================
-// CARGAR PERFIL DESDE FIRESTORE
-// =======================================
 const loadUserProfile = async (uid) => {
   const doc = await db.collection("users").doc(uid).get();
 
@@ -71,20 +74,21 @@ const loadUserProfile = async (uid) => {
 };
 
 // =======================================
-// CREAR CUENTAS ADMINISTRADORAS
+// CREATE ADMINS
 // =======================================
+
 const ensureAdminAccounts = async () => {
   for (const email of ADMIN_EMAILS) {
     try {
       let user;
 
       try {
-        // VERIFICAR SI YA EXISTE
         user = await auth.getUserByEmail(email);
 
         console.log(`Admin existente: ${email}`);
+
       } catch {
-        // CREAR ADMIN SI NO EXISTE
+
         user = await auth.createUser({
           email,
           password: "123456",
@@ -94,7 +98,6 @@ const ensureAdminAccounts = async () => {
         console.log(`Admin creado: ${email}`);
       }
 
-      // GUARDAR PERFIL
       await saveUserProfile(user.uid, {
         email,
         role: "administrador",
@@ -104,18 +107,52 @@ const ensureAdminAccounts = async () => {
       });
 
     } catch (error) {
-      console.error(`Error creando admin ${email}:`, error.message);
+      console.error(error.message);
     }
   }
 };
 
-// EJECUTAR CREACIÓN DE ADMINS
 ensureAdminAccounts();
+
+// =======================================
+// HOME
+// =======================================
+
 app.get("/", (req, res) => {
-  res.send("API Firebase funcionando");
+  res.json({
+    mensaje: "API funcionando correctamente",
+  });
 });
 
-// REGISTRO
+// =======================================
+// USERS
+// =======================================
+
+app.get("/api/users", async (req, res) => {
+  try {
+    const snapshot = await db.collection("users").get();
+
+    const users = snapshot.docs.map((doc) => ({
+      id: doc.id,
+      ...doc.data(),
+    }));
+
+    res.json(users);
+
+  } catch (error) {
+    console.error(error);
+
+    res.status(500).json({
+      mensaje: "Error al obtener usuarios",
+      error: error.message,
+    });
+  }
+});
+
+// =======================================
+// REGISTER
+// =======================================
+
 app.post("/api/register", async (req, res) => {
   try {
     const {
@@ -127,54 +164,42 @@ app.post("/api/register", async (req, res) => {
     } = req.body;
 
     const normalizedEmail = email?.toLowerCase().trim();
+
     const normalizedPhone = normalizePhone(phone);
 
     const selectedRole = role || "visitante";
 
-    // VALIDAR DATOS
     if (!normalizedEmail || !password || !nombre) {
       return res.status(400).json({
         mensaje: "Faltan datos obligatorios",
       });
     }
 
-    // VALIDAR CORREO INSTITUCIONAL
     if (!normalizedEmail.endsWith("@epn.edu.ec")) {
       return res.status(400).json({
         mensaje: "Debes usar un correo institucional",
       });
     }
 
-    // VALIDAR LONGITUD DE CONTRASEÑA
     if (password.length < 6) {
       return res.status(400).json({
         mensaje: "La contraseña debe tener mínimo 6 caracteres",
       });
     }
 
-    // VALIDAR TELÉFONO PARA EMPRENDEDOR
     if (
       selectedRole === "emprendedor" &&
       !normalizedPhone
     ) {
       return res.status(400).json({
-        mensaje: "El teléfono es obligatorio para emprendedores",
+        mensaje: "El teléfono es obligatorio",
       });
     }
 
-    // IMPEDIR CREAR ADMINS DESDE EL FRONTEND
-    if (selectedRole === "administrador") {
-      return res.status(403).json({
-        mensaje: "No puedes registrar administradores",
-      });
-    }
-
-    // URL DE FIREBASE SIGNUP
     const signUpUrl =
       `https://identitytoolkit.googleapis.com/v1/accounts:signUp?key=${API_KEY}`;
 
-    // CREAR USUARIO EN FIREBASE
-    const signUpRes = await fetch(signUpUrl, {
+    const response = await fetch(signUpUrl, {
       method: "POST",
 
       headers: {
@@ -188,25 +213,15 @@ app.post("/api/register", async (req, res) => {
       }),
     });
 
-    const signUpData = await signUpRes.json();
+    const data = await response.json();
 
-    // MANEJO DE ERRORES
-    if (!signUpRes.ok) {
-      const errorCode = signUpData.error?.message;
-
-      if (errorCode === "EMAIL_EXISTS") {
-        return res.status(400).json({
-          mensaje: "El correo ya está registrado",
-        });
-      }
-
-      return res.status(500).json({
-        mensaje: "Error al registrar usuario",
-        detalle: signUpData,
+    if (!response.ok) {
+      return res.status(400).json({
+        mensaje:
+          data.error?.message || "Error al registrar",
       });
     }
 
-    // PERFIL DEL USUARIO
     const profile = {
       email: normalizedEmail,
       role: selectedRole,
@@ -215,36 +230,19 @@ app.post("/api/register", async (req, res) => {
       createdAt: new Date().toISOString(),
     };
 
-    // GUARDAR PERFIL
-    await saveUserProfile(signUpData.localId, profile);
-
-    // ENVIAR CORREO DE VERIFICACIÓN
-    const sendVerifyUrl =
-      `https://identitytoolkit.googleapis.com/v1/accounts:sendOobCode?key=${API_KEY}`;
-
-    await fetch(sendVerifyUrl, {
-      method: "POST",
-
-      headers: {
-        "Content-Type": "application/json",
-      },
-
-      body: JSON.stringify({
-        requestType: "VERIFY_EMAIL",
-        idToken: signUpData.idToken,
-      }),
-    });
+    await saveUserProfile(data.localId, profile);
 
     res.status(201).json({
       mensaje: "Usuario registrado correctamente",
+      uid: data.localId,
     });
 
   } catch (error) {
     console.error(error);
 
     res.status(500).json({
-      mensaje: "Error interno del servidor",
-      detalle: error.message,
+      mensaje: "Error interno",
+      error: error.message,
     });
   }
 });
@@ -252,6 +250,7 @@ app.post("/api/register", async (req, res) => {
 // =======================================
 // LOGIN
 // =======================================
+
 app.post("/api/login", async (req, res) => {
   try {
     const { email, password } = req.body;
@@ -259,18 +258,15 @@ app.post("/api/login", async (req, res) => {
     const normalizedEmail =
       email?.toLowerCase().trim();
 
-    // VALIDAR DATOS
     if (!normalizedEmail || !password) {
       return res.status(400).json({
         mensaje: "Correo y contraseña requeridos",
       });
     }
 
-    // URL LOGIN FIREBASE
     const url =
       `https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key=${API_KEY}`;
 
-    // LOGIN FIREBASE
     const response = await fetch(url, {
       method: "POST",
 
@@ -287,7 +283,6 @@ app.post("/api/login", async (req, res) => {
 
     const data = await response.json();
 
-    // ERROR LOGIN
     if (!response.ok) {
       return res.status(401).json({
         mensaje:
@@ -299,41 +294,15 @@ app.post("/api/login", async (req, res) => {
     let phone = "";
     let nombre = "";
 
-    // CARGAR PERFIL
     const profile =
       await loadUserProfile(data.localId);
 
-    // SI EXISTE PERFIL
     if (profile) {
-      role =
-        profile.role ||
-        getRoleByEmail(normalizedEmail);
-
+      role = profile.role || role;
       phone = profile.phone || "";
-
       nombre = profile.nombre || "";
     }
 
-    // SI NO EXISTE PERFIL
-    else {
-      role =
-        getRoleByEmail(normalizedEmail);
-
-      const newProfile = {
-        email: normalizedEmail,
-        role,
-        nombre: "",
-        phone: "",
-        createdAt: new Date().toISOString(),
-      };
-
-      await saveUserProfile(
-        data.localId,
-        newProfile
-      );
-    }
-
-    // RESPUESTA LOGIN
     res.json({
       mensaje: "Login exitoso",
       token: data.idToken,
@@ -348,24 +317,26 @@ app.post("/api/login", async (req, res) => {
     console.error(error);
 
     res.status(500).json({
-      mensaje: "Error interno del servidor",
+      mensaje: "Error interno",
+      error: error.message,
     });
   }
 });
 
-// GOOGLE SIGN IN
+// =======================================
+// GOOGLE LOGIN
+// =======================================
+
 app.post("/api/google", async (req, res) => {
   try {
     const { idToken } = req.body;
 
-    // VALIDAR TOKEN
     if (!idToken) {
       return res.status(400).json({
         mensaje: "Falta idToken",
       });
     }
 
-    // VERIFICAR TOKEN
     const decoded =
       await auth.verifyIdToken(idToken);
 
@@ -379,34 +350,12 @@ app.post("/api/google", async (req, res) => {
     const normalizedEmail =
       email?.toLowerCase().trim();
 
-    let userRecord;
-
-    try {
-      // BUSCAR USUARIO
-      userRecord =
-        await auth.getUser(uid);
-
-    } catch {
-
-      // CREAR SI NO EXISTE
-      userRecord =
-        await auth.createUser({
-          uid,
-          email: normalizedEmail,
-          displayName: name || "",
-          photoURL: picture || null,
-        });
-    }
-
-    // OBTENER ROL
     let role =
       getRoleByEmail(normalizedEmail);
 
-    // CARGAR PERFIL
     const existingProfile =
       await loadUserProfile(uid);
 
-    // SI NO EXISTE PERFIL
     if (!existingProfile) {
       await saveUserProfile(uid, {
         email: normalizedEmail,
@@ -417,11 +366,9 @@ app.post("/api/google", async (req, res) => {
       });
     }
 
-    // CREAR CUSTOM TOKEN
     const customToken =
       await auth.createCustomToken(uid);
 
-    // RESPUESTA
     res.json({
       mensaje: "Google login exitoso",
       uid,
@@ -434,130 +381,193 @@ app.post("/api/google", async (req, res) => {
     console.error(error);
 
     res.status(500).json({
-      mensaje: "Error en Google Sign-In",
-      detalle: error.message,
+      mensaje: "Error Google login",
+      error: error.message,
     });
   }
 });
 
-// PRODUCTOS
+// =======================================
+// PRODUCTS
+// =======================================
 
-const productCollection = db.collection('products');
+const productCollection = db.collection("products");
 
-app.get('/api/products', async (req, res) => {
+app.get("/api/products", async (req, res) => {
   try {
-    const snapshot = await productCollection.get();
-    const products = snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
+    const snapshot =
+      await productCollection.get();
+
+    const products = snapshot.docs.map((doc) => ({
+      id: doc.id,
+      ...doc.data(),
+    }));
+
     res.json(products);
+
   } catch (error) {
-    console.error('Error al obtener productos:', error);
-    res.status(500).json({ mensaje: 'Error al obtener productos' });
+    console.error(error);
+
+    res.status(500).json({
+      mensaje: "Error al obtener productos",
+      error: error.message,
+    });
   }
 });
 
-app.get('/api/products/:id', async (req, res) => {
+app.get("/api/products/:id", async (req, res) => {
   try {
     const { id } = req.params;
-    const doc = await productCollection.doc(id).get();
+
+    const doc =
+      await productCollection.doc(id).get();
+
     if (!doc.exists) {
-      return res.status(404).json({ mensaje: 'Producto no encontrado' });
+      return res.status(404).json({
+        mensaje: "Producto no encontrado",
+      });
     }
-    res.json({ id: doc.id, ...doc.data() });
+
+    res.json({
+      id: doc.id,
+      ...doc.data(),
+    });
+
   } catch (error) {
-    console.error('Error al obtener producto:', error);
-    res.status(500).json({ mensaje: 'Error al obtener producto' });
+    console.error(error);
+
+    res.status(500).json({
+      mensaje: "Error al obtener producto",
+      error: error.message,
+    });
   }
 });
 
-app.get('/api/products/user/:userId', async (req, res) => {
-  try {
-    const { userId } = req.params;
-    const snapshot = await productCollection.where('userId', '==', userId).get();
-    const products = snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
-    res.json(products);
-  } catch (error) {
-    console.error('Error al obtener productos por usuario:', error);
-    res.status(500).json({ mensaje: 'Error al obtener productos del usuario' });
-  }
-});
-
-app.post('/api/products', async (req, res) => {
+app.post("/api/products", async (req, res) => {
   try {
     const product = {
       ...req.body,
-      price: req.body.price ? Number(req.body.price) : 0,
+      price: req.body.price
+        ? Number(req.body.price)
+        : 0,
       createdAt: new Date().toISOString(),
     };
-    const docRef = await productCollection.add(product);
-    res.status(201).json({ id: docRef.id, ...product });
+
+    const docRef =
+      await productCollection.add(product);
+
+    res.status(201).json({
+      id: docRef.id,
+      ...product,
+    });
+
   } catch (error) {
-    console.error('Error al crear producto:', error);
-    res.status(500).json({ mensaje: 'Error al crear producto' });
+    console.error(error);
+
+    res.status(500).json({
+      mensaje: "Error al crear producto",
+      error: error.message,
+    });
   }
 });
 
-app.put('/api/products/:id', async (req, res) => {
+app.put("/api/products/:id", async (req, res) => {
   try {
     const { id } = req.params;
+
     const product = {
       ...req.body,
-      price: req.body.price ? Number(req.body.price) : 0,
       updatedAt: new Date().toISOString(),
     };
+
     await productCollection.doc(id).update(product);
-    res.json({ id, ...product });
+
+    res.json({
+      id,
+      ...product,
+    });
+
   } catch (error) {
-    console.error('Error al actualizar producto:', error);
-    res.status(500).json({ mensaje: 'Error al actualizar producto' });
+    console.error(error);
+
+    res.status(500).json({
+      mensaje: "Error al actualizar producto",
+      error: error.message,
+    });
   }
 });
 
-app.delete('/api/products/:id', async (req, res) => {
+app.delete("/api/products/:id", async (req, res) => {
   try {
     const { id } = req.params;
+
     await productCollection.doc(id).delete();
-    res.json({ mensaje: 'Producto eliminado correctamente' });
+
+    res.json({
+      mensaje: "Producto eliminado",
+    });
+
   } catch (error) {
-    console.error('Error al eliminar producto:', error);
-    res.status(500).json({ mensaje: 'Error al eliminar producto' });
+    console.error(error);
+
+    res.status(500).json({
+      mensaje: "Error al eliminar producto",
+      error: error.message,
+    });
   }
 });
 
-// CONTACT / ENVIAR MENSAJE A ADMINS
-app.post('/api/contact', async (req, res) => {
+// =======================================
+// CONTACT
+// =======================================
+
+app.post("/api/contact", async (req, res) => {
   try {
     const { name, email, subject, message } = req.body;
 
     if (!name || !email || !message) {
-      return res.status(400).json({ mensaje: 'Faltan campos obligatorios' });
+      return res.status(400).json({
+        mensaje: "Faltan campos",
+      });
     }
 
-    const to = ADMIN_EMAILS.join(',');
+    const to = ADMIN_EMAILS.join(",");
 
     const html = `
-      <p><strong>De:</strong> ${name} &lt;${email}&gt;</p>
-      <p><strong>Asunto:</strong> ${subject || 'Contacto desde sitio'}</p>
+      <p><strong>De:</strong> ${name}</p>
+      <p><strong>Email:</strong> ${email}</p>
+      <p><strong>Asunto:</strong> ${subject}</p>
       <hr />
-      <div>${message.replace(/\n/g, '<br/>')}</div>
+      <div>${message}</div>
     `;
 
     await sendEmail({
       to,
-      subject: subject || `Mensaje desde SWES: ${name}`,
+      subject: subject || "Nuevo mensaje",
       html,
       replyTo: email,
     });
 
-    res.json({ mensaje: 'Mensaje enviado correctamente' });
+    res.json({
+      mensaje: "Mensaje enviado",
+    });
+
   } catch (error) {
-    console.error('Error enviando mensaje de contacto:', error);
-    res.status(500).json({ mensaje: 'Error al enviar mensaje' });
+    console.error(error);
+
+    res.status(500).json({
+      mensaje: "Error al enviar mensaje",
+      error: error.message,
+    });
   }
 });
 
-// INICIAR SERVIDOR
+// =======================================
+// SERVER
+// =======================================
+
 const PORT = process.env.PORT || 8000;
 
 app.listen(PORT, () => {
-  console.log(`Servidor corriendo en http://localhost:${PORT}`);
+  console.log(`Servidor corriendo en puerto ${PORT}`);
 });
