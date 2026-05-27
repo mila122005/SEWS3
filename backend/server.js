@@ -6,15 +6,52 @@ require("dotenv").config();
 const authRoutes = require("./routes/auth.routes");
 
 const app = express();
-app.use(cors());
+
+// ==============================
+// CORS VERCEL + LOCALHOST
+// ==============================
+
+app.use(
+  cors({
+    origin: [
+      "http://localhost:5173",
+      "https://sews-3-camila-s-projects-39088000.vercel.app",
+    ],
+    credentials: true,
+  })
+);
+
 app.use(express.json());
 
-app.get("/", (req, res) => res.send("API Auth funcionando"));
+// ==============================
+// RUTAS
+// ==============================
+
+app.get("/", (req, res) =>
+  res.send("API Auth funcionando")
+);
+
 app.use("/api/auth", authRoutes);
 
-mongoose.connect(process.env.MONGO_URI)
-  .then(() => console.log("MongoDB conectado"))
-  .catch((error) => console.error(error.message));
+// ==============================
+// MONGODB
+// ==============================
+
+mongoose
+  .connect(process.env.MONGO_URI)
+  .then(() =>
+    console.log("MongoDB conectado")
+  )
+  .catch((error) =>
+    console.error(error.message)
+  );
+
+// ==============================
+// SERVER
+// ==============================
 
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log(`Servidor en http://localhost:${PORT}`));
+
+app.listen(PORT, () =>
+  console.log(`Servidor en puerto ${PORT}`)
+);
