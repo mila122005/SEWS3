@@ -15,37 +15,48 @@ const Register = () => {
   // REGISTRO NORMAL
   const handleSubmit = async (e) => {
     e.preventDefault();
-    setMensaje({ texto: '', tipo: '' });
+
+    setMensaje({
+      texto: '',
+      tipo: '',
+    });
 
     const formData = new FormData(e.target);
     const data = Object.fromEntries(formData);
 
-    const normalizedEmail = data.email?.toLowerCase().trim();
+    const normalizedEmail =
+      data.email?.toLowerCase().trim();
 
     // VALIDAR CORREO EPN
-    if (!normalizedEmail?.endsWith('@epn.edu.ec')) {
+    if (
+      !normalizedEmail?.endsWith(
+        '@epn.edu.ec'
+      )
+    ) {
       setMensaje({
         texto:
           'Error: Solo se permiten correos institucionales @epn.edu.ec. Si eres visitante, usa "Registrarse con Google".',
         tipo: 'error',
       });
+
       return;
     }
 
-    // VALIDACIONES ESPECÍFICAS PARA EMPRENDEDOR
+    // VALIDACIONES EMPRENDEDOR
     if (role === 'emprendedor') {
-      const phoneClean = data.phone?.trim();
+      const phoneClean =
+        data.phone?.trim();
 
-      // 1. Validar que no esté vacío
       if (!phoneClean) {
         setMensaje({
-          texto: 'Error: El número de celular es obligatorio.',
+          texto:
+            'Error: El número de celular es obligatorio.',
           tipo: 'error',
         });
+
         return;
       }
 
-      // 2. Validar que tenga exactamente 10 dígitos numéricos
       const phoneRegex = /^0\d{9}$/;
 
       if (!phoneRegex.test(phoneClean)) {
@@ -54,36 +65,46 @@ const Register = () => {
             'Error: El número de celular debe tener exactamente 10 dígitos y empezar con 0 (Ej: 09XXXXXXXX).',
           tipo: 'error',
         });
+
         return;
       }
     }
 
     try {
-      const res = await fetch(`${API_URL}/api/register`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          nombre: data.nombre,
-          email: normalizedEmail,
-          password: data.password,
-          role: role,
-          phone: data.phone || '',
-        }),
-      });
+      const res = await fetch(
+        `${API_URL}/api/auth/register`,
+        {
+          method: 'POST',
+
+          headers: {
+            'Content-Type':
+              'application/json',
+          },
+
+          body: JSON.stringify({
+            nombre: data.nombre,
+            email: normalizedEmail,
+            password: data.password,
+            role: role,
+            phone: data.phone || '',
+          }),
+        }
+      );
 
       const result = await res.json();
 
       if (res.ok) {
         setMensaje({
-          texto: result.message || '¡Registro exitoso!',
+          texto:
+            result.message ||
+            '¡Registro exitoso!',
           tipo: 'success',
         });
 
         setTimeout(() => {
           navigate('/login');
         }, 1500);
+
       } else {
         const errorText =
           result.message ||
@@ -94,11 +115,13 @@ const Register = () => {
           tipo: 'error',
         });
       }
+
     } catch (error) {
       console.error(error);
 
       setMensaje({
-        texto: 'Error: Error de conexión con el servidor.',
+        texto:
+          'Error: Error de conexión con el servidor.',
         tipo: 'error',
       });
     }
@@ -107,36 +130,60 @@ const Register = () => {
   // GOOGLE
   const handleGoogle = async () => {
     try {
-      setMensaje({ texto: '', tipo: '' });
+      setMensaje({
+        texto: '',
+        tipo: '',
+      });
 
-      const provider = new GoogleAuthProvider();
+      const provider =
+        new GoogleAuthProvider();
 
-      const result = await signInWithPopup(auth, provider);
+      const result =
+        await signInWithPopup(
+          auth,
+          provider
+        );
 
-      const email = result.user.email?.toLowerCase();
+      const email =
+        result.user.email?.toLowerCase();
 
-      const idToken = await result.user.getIdToken();
+      const idToken =
+        await result.user.getIdToken();
 
-      const res = await googleSignIn(idToken);
+      const res =
+        await googleSignIn(idToken);
 
       if (res) {
-        localStorage.setItem('uid', result.user.uid);
-        localStorage.setItem('email', email);
+        localStorage.setItem(
+          'uid',
+          result.user.uid
+        );
+
+        localStorage.setItem(
+          'email',
+          email
+        );
+
         localStorage.setItem(
           'name',
           result.user.displayName || ''
         );
 
-        localStorage.setItem('role', 'visitante');
+        localStorage.setItem(
+          'role',
+          'visitante'
+        );
 
         setMensaje({
-          texto: '¡Inicio con Google exitoso!',
+          texto:
+            '¡Inicio con Google exitoso!',
           tipo: 'success',
         });
 
         setTimeout(() => {
           navigate('/dashboard');
         }, 1200);
+
       } else {
         setMensaje({
           texto:
@@ -144,11 +191,13 @@ const Register = () => {
           tipo: 'error',
         });
       }
+
     } catch (err) {
       console.error(err);
 
       setMensaje({
-        texto: 'Error con Google Sign-In.',
+        texto:
+          'Error con Google Sign-In.',
         tipo: 'error',
       });
     }
