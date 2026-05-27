@@ -1,0 +1,14 @@
+# Node / React
+node_modules/
+.env
+serviceAccountKey.json
+# Java
+target/
+*.class
+*.jar
+*.exe
+
+# IDEs
+.vscode/
+.idea/
+
